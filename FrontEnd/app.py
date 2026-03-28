@@ -7,7 +7,7 @@ app = Flask(__name__)
 DATA_FILE = "fake_data.csv"   # path to your CSV, relative to app.py
 
 # --- Routes ------------------------------------------------------------------
-
+OPENROUTER_API_KEY = "your-openrouter-api-key-here"
 @app.route("/")
 def index():
     return render_template("index.html")
