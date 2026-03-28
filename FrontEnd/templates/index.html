@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Buy vs. Rent Interactive Map</title>
+
+  <!-- Plotly for the choropleth map -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.27.0/plotly.min.js"></script>
+  <!-- Chart.js for county bar charts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+
+  <style>
+    /* ── TOKENS ────────────────────────────────────────────────── */
+    :root {
+      --bg:          #0b0f14;
+      --surface:     #121820;
+      --surface2:    #1a2330;
+      --border:      #243040;
+      --accent-buy:  #3dd68c;
+      --accent-rent: #f05252;
+      --accent-mid:  #f5c842;
+      --text:        #e8edf2;
+      --text-muted:  #6b7f94;
+      --font-display: 'DM Serif Display', Georgia, serif;
+      --font-mono:    'DM Mono', 'Courier New', monospace;
+    }
+
+    /* ── RESET ─────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-mono);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── NOISE TEXTURE OVERLAY ─────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── LAYOUT ────────────────────────────────────────────────── */
+    .page {
+      position: relative;
+      z-index: 1;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 2rem 6rem;
+    }
+
+    /* ── HEADER ────────────────────────────────────────────────── */
+    header {
+      padding: 4rem 0 2.5rem;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 3rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--accent-buy);
+    }
+
+    h1 {
+      font-family: var(--font-display);
+      font-size: clamp(2.2rem, 5vw, 3.8rem);
+      line-height: 1.1;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+
+    h1 em {
+      font-style: italic;
+      color: var(--accent-mid);
+    }
+
+    .subtitle {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      max-width: 55ch;
+      line-height: 1.7;
+      margin-top: 0.25rem;
+    }
+
+    /* ── LEGEND ────────────────────────────────────────────────── */
+    .legend {
+      display: flex;
+      gap: 2rem;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 1.5rem;
+    }
+
+    .legend-label {
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.75rem;
+      color: var(--text);
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    /* ── SCENARIO CONTROLS ─────────────────────────────────────── */
+    .controls {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem 2rem;
+      margin-bottom: 2rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 2rem;
+      align-items: end;
+    }
+
+    .control-group label {
+      display: block;
+      font-size: 0.68rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 0.6rem;
+    }
+
+    .control-group .value-display {
+      font-size: 1.1rem;
+      font-family: var(--font-display);
+      color: var(--accent-mid);
+      margin-bottom: 0.4rem;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      -webkit-appearance: none;
+      height: 3px;
+      border-radius: 2px;
+      background: var(--border);
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--accent-mid);
+      cursor: pointer;
+      transition: transform 0.15s;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.3); }
+
+    .crash-buttons {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .crash-btn {
+      padding: 0.4rem 0.9rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      letter-spacing: 0.05em;
+    }
+
+    .crash-btn:hover,
+    .crash-btn.active {
+      border-color: var(--accent-rent);
+      color: var(--accent-rent);
+      background: rgba(240, 82, 82, 0.08);
+    }
+
+    .crash-btn.active { font-weight: 500; }
+
+    .apply-btn {
+      padding: 0.7rem 1.8rem;
+      background: var(--accent-buy);
+      color: #0b0f14;
+      border: none;
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .apply-btn:hover { background: #52e8a4; transform: translateY(-1px); }
+    .apply-btn:active { transform: translateY(0); }
+
+    /* ── MAP CONTAINER ─────────────────────────────────────────── */
+    .map-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      margin-bottom: 1rem;
+    }
+
+    .map-header {
+      padding: 1.2rem 1.8rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .map-header-title {
+      font-size: 0.7rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .map-header-hint {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      opacity: 0.6;
+    }
+
+    #choropleth-map {
+      width: 100%;
+      height: 560px;
+    }
+
+    /* ── STATS ROW ─────────────────────────────────────────────── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      margin: 1.5rem 0;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.2rem 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      transition: border-color 0.2s;
+    }
+
+    .stat-card:hover { border-color: var(--accent-mid); }
+
+    .stat-label {
+      font-size: 0.65rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .stat-value {
+      font-family: var(--font-display);
+      font-size: 2rem;
+      line-height: 1;
+    }
+
+    .stat-value.buy  { color: var(--accent-buy); }
+    .stat-value.rent { color: var(--accent-rent); }
+    .stat-value.mid  { color: var(--accent-mid); }
+
+    .stat-sub {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+    }
+
+    /* ── COUNTY CHART SECTION ──────────────────────────────────── */
+    #county-section {
+      margin-top: 3rem;
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+      pointer-events: none;
+    }
+
+    #county-section.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: baseline;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-title {
+      font-family: var(--font-display);
+      font-size: 1.8rem;
+      color: var(--text);
+    }
+
+    .section-state-name {
+      font-family: var(--font-display);
+      font-size: 1.8rem;
+      font-style: italic;
+      color: var(--accent-mid);
+    }
+
+    .section-count {
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    .county-chart-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.8rem;
+      overflow: hidden;
+    }
+
+    #county-chart {
+      width: 100%;
+      /* height set dynamically */
+    }
+
+    /* ── FOOTER ────────────────────────────────────────────────── */
+    footer {
+      margin-top: 5rem;
+      padding-top: 2rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    /* ── LOADING SPINNER ───────────────────────────────────────── */
+    .spinner {
+      display: none;
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent-buy);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin-left: 0.5rem;
+    }
+    .spinner.active { display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── TOOLTIP ───────────────────────────────────────────────── */
+    .click-hint {
+      text-align: center;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      padding: 0.6rem;
+      letter-spacing: 0.08em;
+    }
+
+    /* ── RESPONSIVE ────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .controls { grid-template-columns: 1fr; }
+      .stats-row { grid-template-columns: 1fr 1fr; }
+      #choropleth-map { height: 380px; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HEADER -->
+  <header>
+    <span class="eyebrow">Financial Decision Tool · 5% Rule Analysis</span>
+    <h1>Buy vs. Rent<br><em>Interactive Map</em></h1>
+    <p class="subtitle">
+      County-level analysis of whether renting or buying makes financial sense,
+      based on the 5% rule. Stress-test your decision against inflation and
+      market crash scenarios.
+    </p>
+  </header>
+
+  <!-- SCENARIO CONTROLS -->
+  <div class="controls">
+    <div class="control-group">
+      <label>Inflation Rate</label>
+      <div class="value-display" id="inflation-display">0.0%</div>
+      <input type="range" id="inflation-slider" min="0" max="10" step="0.5" value="0"
+             oninput="document.getElementById('inflation-display').textContent = parseFloat(this.value).toFixed(1) + '%'">
+    </div>
+
+    <div class="control-group">
+      <label>Crash Scenario</label>
+      <div class="crash-buttons">
+        <button class="crash-btn active" data-crash="0" onclick="setCrash(this)">None</button>
+        <button class="crash-btn" data-crash="10" onclick="setCrash(this)">−10%</button>
+        <button class="crash-btn" data-crash="20" onclick="setCrash(this)">−20%</button>
+        <button class="crash-btn" data-crash="30" onclick="setCrash(this)">−30%</button>
+      </div>
+    </div>
+
+    <div>
+      <button class="apply-btn" onclick="applyScenario()">
+        Apply Scenario <span class="spinner" id="spinner"></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <span class="legend-label">Map key —</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#3dd68c"></span>Buying is cheaper</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#f5c842"></span>Break-even</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#f05252"></span>Renting is cheaper</span>
+  </div>
+
+  <!-- MAP -->
+  <div class="map-section">
+    <div class="map-header">
+      <span class="map-header-title">United States · All Counties</span>
+      <span class="map-header-hint">Click a state to drill into county detail ↓</span>
+    </div>
+    <div id="choropleth-map"></div>
+    <div class="click-hint">Hover for county details · Click state to see county breakdown</div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <span class="stat-label">Counties — Buy</span>
+      <span class="stat-value buy" id="stat-buy">—</span>
+      <span class="stat-sub" id="stat-buy-pct">of total analyzed</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Counties — Rent</span>
+      <span class="stat-value rent" id="stat-rent">—</span>
+      <span class="stat-sub" id="stat-rent-pct">of total analyzed</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Borderline Counties</span>
+      <span class="stat-value mid" id="stat-border">—</span>
+      <span class="stat-sub" id="stat-border-pct">within $50/mo of break-even</span>
+    </div>
+  </div>
+
+  <!-- COUNTY DRILL-DOWN SECTION -->
+  <div id="county-section">
+    <div class="section-header">
+      <span class="section-title">Counties in</span>
+      <span class="section-state-name" id="selected-state-name">—</span>
+      <span class="section-count" id="county-count"></span>
+    </div>
+    <div class="county-chart-wrap">
+      <canvas id="county-chart"></canvas>
+    </div>
+  </div>
+
+  <footer>
+    <span>5% Rule: property tax ~1% + maintenance ~1% + cost of capital ~3% = 5% annual threshold</span>
+    <span>Data: county_housing_buy_vs_rent · Proof of concept</span>
+  </footer>
+
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────────────────────
+let allData       = [];   // raw rows from /api/data
+let scenarioData  = [];   // rows after scenario applied
+let countyChart   = null;
+let selectedCrash = 0;
+
+const BASE_RULE   = 0.05;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BOOT
+// ─────────────────────────────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", async () => {
+  await loadData();
+  applyScenario();
+});
+
+async function loadData() {
+  try {
+    const res  = await fetch("/api/data");
+    const json = await res.json();
+    allData = json.data;
+  } catch (e) {
+    console.error("Failed to load data:", e);
+    allData = [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCENARIO LOGIC  (mirrors Python logic exactly)
+// ─────────────────────────────────────────────────────────────────────────────
+function applyScenario() {
+  const inflationRate = parseFloat(document.getElementById("inflation-slider").value) / 100;
+  const crashPct      = selectedCrash / 100;
+
+  setSpinner(true);
+
+  setTimeout(() => {
+    scenarioData = allData
+      .filter(d => d.rent_2br != null && d.median_price != null)
+      .map(d => {
+        const adjPrice        = d.median_price * (1 - crashPct);
+        const inflationCost   = (adjPrice * inflationRate) / 12;
+        const breakevenRent   = (adjPrice * BASE_RULE) / 12;
+        const effBreakeven    = breakevenRent + inflationCost;
+        const monthlyGap      = d.rent_2br - effBreakeven;
+        const verdict         = monthlyGap > 50 ? "BUY" : monthlyGap < -50 ? "RENT" : "BORDERLINE";
+
+        return {
+          ...d,
+          fips:           String(d.fips).padStart(5, "0"),
+          adj_price:      adjPrice,
+          breakeven_rent: breakevenRent,
+          eff_breakeven:  effBreakeven,
+          monthly_gap:    monthlyGap,
+          verdict
+        };
+      });
+
+    updateStats();
+    renderMap();
+    setSpinner(false);
+  }, 50); // brief delay so spinner renders
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATS
+// ─────────────────────────────────────────────────────────────────────────────
+function updateStats() {
+  const total  = scenarioData.length;
+  const buy    = scenarioData.filter(d => d.verdict === "BUY").length;
+  const rent   = scenarioData.filter(d => d.verdict === "RENT").length;
+  const border = scenarioData.filter(d => d.verdict === "BORDERLINE").length;
+
+  document.getElementById("stat-buy").textContent    = buy.toLocaleString();
+  document.getElementById("stat-rent").textContent   = rent.toLocaleString();
+  document.getElementById("stat-border").textContent = border.toLocaleString();
+  document.getElementById("stat-buy-pct").textContent    = `${(buy/total*100).toFixed(1)}% of ${total.toLocaleString()} counties`;
+  document.getElementById("stat-rent-pct").textContent   = `${(rent/total*100).toFixed(1)}% of ${total.toLocaleString()} counties`;
+  document.getElementById("stat-border-pct").textContent = `${(border/total*100).toFixed(1)}% within $50/mo of break-even`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHOROPLETH MAP
+// ─────────────────────────────────────────────────────────────────────────────
+async function renderMap() {
+  const gaps  = scenarioData.map(d => d.monthly_gap);
+  const absMax = Math.max(Math.abs(percentile(gaps, 5)), Math.abs(percentile(gaps, 95)));
+
+  const geojson = await fetch(
+    "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
+  ).then(r => r.json());
+
+  const trace = {
+    type:       "choropleth",
+    geojson,
+    locations:  scenarioData.map(d => d.fips),
+    z:          scenarioData.map(d => d.monthly_gap),
+    zmin:       -absMax,
+    zmax:       absMax,
+    colorscale: [
+      [0,    "#f05252"],
+      [0.45, "#f5c842"],
+      [0.5,  "#f5f0dc"],
+      [0.55, "#f5c842"],
+      [1,    "#3dd68c"]
+    ],
+    showscale:  true,
+    colorbar: {
+      title:      { text: "$/mo gap", font: { color: "#6b7f94", size: 11 } },
+      tickfont:   { color: "#6b7f94", size: 10 },
+      bgcolor:    "rgba(0,0,0,0)",
+      bordercolor:"rgba(0,0,0,0)",
+      tickprefix: "$",
+    },
+    marker:     { line: { color: "#1a2330", width: 0.3 } },
+    hovertemplate:
+      "<b>%{customdata[0]}, %{customdata[1]}</b><br>" +
+      "Actual rent:   $%{customdata[2]:,.0f}/mo<br>" +
+      "Break-even:    $%{customdata[3]:,.0f}/mo<br>" +
+      "Monthly gap:   $%{z:+,.0f}<br>" +
+      "Verdict:       %{customdata[4]}" +
+      "<extra></extra>",
+    customdata: scenarioData.map(d => [
+      d.county, d.state, d.rent_2br,
+      Math.round(d.eff_breakeven), d.verdict
+    ])
+  };
+
+  const layout = {
+    geo: {
+      scope:       "usa",
+      showlakes:   false,
+      bgcolor:     "#0b0f14",
+      landcolor:   "#121820",
+      subunitcolor:"#243040",
+      coastlinecolor:"#243040",
+    },
+    paper_bgcolor: "#121820",
+    plot_bgcolor:  "#121820",
+    margin:        { t: 0, b: 0, l: 0, r: 0 },
+    font:          { family: "'DM Mono', monospace", color: "#6b7f94" },
+  };
+
+  const config = { responsive: true, displayModeBar: false, scrollZoom: false };
+
+  await Plotly.react("choropleth-map", [trace], layout, config);
+
+  // Listen for clicks → drill into state
+  document.getElementById("choropleth-map").on("plotly_click", e => {
+    if (!e.points || !e.points[0]) return;
+    const idx   = e.points[0].pointIndex;
+    const state = scenarioData[idx]?.state;
+    if (state) renderCountyChart(state);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COUNTY BAR CHART
+// ─────────────────────────────────────────────────────────────────────────────
+function renderCountyChart(stateName) {
+  const counties = scenarioData
+    .filter(d => d.state === stateName)
+    .sort((a, b) => b.monthly_gap - a.monthly_gap);
+
+  if (!counties.length) return;
+
+  document.getElementById("selected-state-name").textContent = stateName;
+  document.getElementById("county-count").textContent =
+    `${counties.length} ${counties.length === 1 ? "county" : "counties"}`;
+
+  const section = document.getElementById("county-section");
+  section.classList.add("visible");
+  section.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  const labels = counties.map(d => d.county.replace(" County", "").replace(" Parish", ""));
+  const values = counties.map(d => d.monthly_gap);
+  const colors = values.map(v =>
+    v > 50  ? "rgba(61,214,140,0.85)" :
+    v < -50 ? "rgba(240,82,82,0.85)"  :
+              "rgba(245,200,66,0.85)"
+  );
+
+  const canvasEl = document.getElementById("county-chart");
+  canvasEl.height = Math.max(320, counties.length * 28);
+
+  if (countyChart) countyChart.destroy();
+
+  countyChart = new Chart(canvasEl, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Monthly Gap ($/mo)",
+        data:   values,
+        backgroundColor: colors,
+        borderRadius:    4,
+        borderSkipped:   false,
+      }]
+    },
+    options: {
+      indexAxis:   "y",
+      responsive:  true,
+      maintainAspectRatio: false,
+      animation:   { duration: 600, easing: "easeOutQuart" },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "#1a2330",
+          borderColor:     "#243040",
+          borderWidth:     1,
+          titleColor:      "#e8edf2",
+          bodyColor:       "#6b7f94",
+          titleFont:       { family: "'DM Mono', monospace", size: 12 },
+          bodyFont:        { family: "'DM Mono', monospace", size: 11 },
+          callbacks: {
+            title: ctx => counties[ctx[0].dataIndex].county,
+            label: ctx => {
+              const d = counties[ctx.dataIndex];
+              const gap = ctx.raw;
+              const dir = gap > 0 ? "Buying cheaper by" : gap < 0 ? "Renting cheaper by" : "Break-even";
+              return [
+                `${dir}: $${Math.abs(gap).toFixed(0)}/mo`,
+                `Actual rent:  $${d.rent_2br.toLocaleString()}/mo`,
+                `Break-even:   $${Math.round(d.eff_breakeven).toLocaleString()}/mo`,
+                `Verdict: ${d.verdict}`
+              ];
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid:  { color: "rgba(36,48,64,0.6)" },
+          border:{ color: "#243040" },
+          ticks: {
+            color: "#6b7f94",
+            font:  { family: "'DM Mono', monospace", size: 10 },
+            callback: v => `$${v >= 0 ? "+" : ""}${v.toFixed(0)}`
+          },
+        },
+        y: {
+          grid:  { display: false },
+          border:{ color: "#243040" },
+          ticks: { color: "#e8edf2", font: { family: "'DM Mono', monospace", size: 11 } }
+        }
+      }
+    }
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+function setCrash(btn) {
+  document.querySelectorAll(".crash-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  selectedCrash = parseInt(btn.dataset.crash);
+}
+
+function setSpinner(on) {
+  document.getElementById("spinner").classList.toggle("active", on);
+}
+
+function percentile(arr, p) {
+  const sorted = [...arr].sort((a, b) => a - b);
+  const idx    = Math.floor((p / 100) * sorted.length);
+  return sorted[Math.max(0, Math.min(idx, sorted.length - 1))];
+}
+</script>
+</body>
+</html>
