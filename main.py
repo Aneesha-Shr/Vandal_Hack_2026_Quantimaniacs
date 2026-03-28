@@ -1,110 +1,165 @@
+import pandas as pd
 import matplotlib.pyplot as plt
-'''
-rent = 0
-house_cost = 0
-int_rate = 0 #interest rate on loan
-increase_home_val = 0 #percentage of increase in home value per year
-increase_rent = 0 #percentage of rent increase per year
-treasury_bond = 0 #return rate on a treasury bond per year
-down_payment_percent = 0
-loan_term_years = 0
+import matplotlib.ticker as mticker
 
+# =============================================================================
+# 5% RULE: RENT VS. BUY ANALYSIS BY COUNTY
+# =============================================================================
+# The 5% Rule (Ben Felix):
+#   Break-even monthly rent = (Home Price x 5%) / 12
+#
+#   The 5% breaks down as:
+#     ~1% property tax
+#     ~1% maintenance / cost of ownership
+#     ~3% cost of capital (opportunity cost + mortgage interest)
+#
+#   If actual rent < break-even rent → RENTING is cheaper
+#   If actual rent > break-even rent → BUYING is cheaper
+# =============================================================================
 
+# --- Configuration -----------------------------------------------------------
 
-def calculate_rent_total(mortgage_price):
-   if mortgage_price > rent:
-      diff = mortgage_price-rent
-   else:
-      diff = rent - mortgage_price
-'''
-def calculate_rent_vs_buy(
-    house_cost, 
-    rent, 
-    int_rate, 
-    increase_home_val, 
-    increase_rent, 
-    treasury_bond, 
-    down_payment_percent, 
-    loan_term_years
-):
-    # --- Initial Setup ---
-    down_payment = house_cost * down_payment_percent
-    loan_principal = house_cost - down_payment
-    
-    # Monthly rates for calculations
-    monthly_int_rate = int_rate / 12
-    total_payments = loan_term_years * 12
-    
-    # Standard Fixed-Rate Mortgage Formula
-    if monthly_int_rate > 0:
-        monthly_mortgage = loan_principal * (monthly_int_rate * (1 + monthly_int_rate)**total_payments) / ((1 + monthly_int_rate)**total_payments - 1)
+INPUT_FILE         = "fake_data.csv"
+OUTPUT_CSV         = "five_percent_rule_results.csv"
+OUTPUT_CHART_ALL   = "five_percent_rule_all_states.png"
+OUTPUT_CHART_IDAHO = "five_percent_rule_idaho.png"
+
+FIVE_PCT_ANNUAL = 0.05   # The 5% rule constant
+
+# --- Load & Validate Data ----------------------------------------------------
+
+df = pd.read_csv(INPUT_FILE)
+
+# Drop rows missing either rent or home price — can't run the rule without both
+original_count = len(df)
+df = df.dropna(subset=["rent_2br", "median_price"])
+dropped = original_count - len(df)
+if dropped > 0:
+    print(f"  Note: Dropped {dropped} rows with missing rent or median price data.")
+
+# --- Core 5% Rule Calculations -----------------------------------------------
+
+# Break-even rent: the monthly cost of owning expressed as a rent equivalent
+df["breakeven_rent"] = (df["median_price"] * FIVE_PCT_ANNUAL) / 12
+
+# Monthly gap: positive = buying is cheaper, negative = renting is cheaper
+df["monthly_gap"] = df["rent_2br"] - df["breakeven_rent"]
+
+# Verdict — $50/mo buffer on each side to account for borderline cases
+def assign_verdict(gap):
+    if gap > 50:
+        return "BUY"
+    elif gap < -50:
+        return "RENT"
     else:
-        monthly_mortgage = loan_principal / total_payments
+        return "BORDERLINE"
 
-    # --- Tracking Variables ---
-    current_home_value = house_cost
-    current_loan_balance = loan_principal
-    current_monthly_rent = rent
-    
-    # Renter starts with the down payment invested
-    renter_capital = down_payment 
-    
-    # Lists to store yearly data for graphing
-    years = list(range(1, loan_term_years + 1))
-    buyer_equity_history = []
-    renter_capital_history = []
+df["verdict"] = df["monthly_gap"].apply(assign_verdict)
 
-    # --- The Simulation Loop ---
-    for year in range(1, loan_term_years + 1):
-        
-        # 1. Buyer calculations (Monthly loop for accurate amortization)
-        for _ in range(12):
-            interest_payment = current_loan_balance * monthly_int_rate
-            principal_payment = monthly_mortgage - interest_payment
-            current_loan_balance -= principal_payment
-            
-        # Home value appreciates annually
-        current_home_value *= (1 + increase_home_val)
-        
-        # Buyer Capital (Equity) = Asset Value - Remaining Debt
-        buyer_equity = current_home_value - current_loan_balance
-        buyer_equity_history.append(buyer_equity)
-        
-        # 2. Renter calculations
-        yearly_mortgage_cost = monthly_mortgage * 12
-        yearly_rent_cost = current_monthly_rent * 12
-        
-        # Difference in cash flow (Positive means renting is cheaper that year)
-        cash_flow_difference = yearly_mortgage_cost - yearly_rent_cost
-        
-        # Renter's capital grows by the treasury bond rate, plus/minus the cash flow difference
-        renter_capital = (renter_capital * (1 + treasury_bond)) + cash_flow_difference
-        renter_capital_history.append(renter_capital)
-        
-        # Rent increases annually
-        current_monthly_rent *= (1 + increase_rent)
+# --- Print Summary Table -----------------------------------------------------
 
-    # --- Graphing the Results ---
-    plt.figure(figsize=(10, 6))
-    plt.plot(years, buyer_equity_history, label='Buyer Capital (Home Equity)', color='blue', linewidth=2)
-    plt.plot(years, renter_capital_history, label='Renter Capital (Invested in Treasury)', color='orange', linewidth=2)
-    
-    plt.title('Rent vs. Buy: Capital Accumulation Over Time')
-    plt.xlabel('Years')
-    plt.ylabel('Total Capital ($)')
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    plt.show()
+print("\n" + "=" * 75)
+print("  5% RULE: RENT VS. BUY RESULTS BY COUNTY")
+print("=" * 75)
+print(f"  {'State':<20} {'County':<28} {'Rent':>8} {'Break-even':>12} {'Gap':>8} {'Verdict'}")
+print("-" * 75)
 
-# --- Example Execution ---
-calculate_rent_vs_buy(
-    house_cost=400000,          # $400,000 home
-    rent=2000,                  # $1,000/month starting rent
-    int_rate=0.065,             # 6.5% mortgage interest rate
-    increase_home_val=0.03,     # 3% annual home appreciation
-    increase_rent=0.04,         # 4% annual rent increase
-    treasury_bond=0.04,         # 4.5% annual return on investment
-    down_payment_percent=0.2, 
-    loan_term_years=30
+for _, row in df.sort_values(["state", "county"]).iterrows():
+    print(
+        f"  {row['state']:<20} {row['county']:<28} "
+        f"${row['rent_2br']:>7,.0f} "
+        f"${row['breakeven_rent']:>11,.0f} "
+        f"${row['monthly_gap']:>+7,.0f} "
+        f"{row['verdict']}"
+    )
+
+print("=" * 75)
+
+# --- Summary Statistics ------------------------------------------------------
+
+total      = len(df)
+buy_count  = (df["verdict"] == "BUY").sum()
+rent_count = (df["verdict"] == "RENT").sum()
+border     = (df["verdict"] == "BORDERLINE").sum()
+
+print(f"\n  Total counties analyzed : {total}")
+print(f"  BUY  verdict            : {buy_count}  ({buy_count/total*100:.1f}%)")
+print(f"  RENT verdict            : {rent_count}  ({rent_count/total*100:.1f}%)")
+print(f"  BORDERLINE              : {border}  ({border/total*100:.1f}%)")
+
+# --- Idaho-Specific Summary --------------------------------------------------
+
+idaho = df[df["state"] == "Idaho"].sort_values("monthly_gap", ascending=False)
+if not idaho.empty:
+    print("\n" + "=" * 75)
+    print("  IDAHO COUNTIES — RANKED BEST TO WORST FOR BUYING")
+    print("  (Positive gap = buying is cheaper by that amount per month)")
+    print("=" * 75)
+    print(f"  {'County':<28} {'Rent':>8} {'Break-even':>12} {'Gap':>8} {'Verdict'}")
+    print("-" * 75)
+    for _, row in idaho.iterrows():
+        print(
+            f"  {row['county']:<28} "
+            f"${row['rent_2br']:>7,.0f} "
+            f"${row['breakeven_rent']:>11,.0f} "
+            f"${row['monthly_gap']:>+7,.0f} "
+            f"{row['verdict']}"
+        )
+    print("=" * 75)
+
+# --- Save Results to CSV -----------------------------------------------------
+
+output_cols = ["fips", "state", "county", "rent_2br", "median_price",
+               "breakeven_rent", "monthly_gap", "verdict"]
+df[output_cols].sort_values(["state", "county"]).to_csv(OUTPUT_CSV, index=False)
+print(f"\n  Results saved to: {OUTPUT_CSV}")
+
+# --- Chart 1: All States — Average Gap by State (Bar Chart) ------------------
+
+state_summary = (
+    df.groupby("state")
+      .agg(avg_gap=("monthly_gap", "mean"), county_count=("county", "count"))
+      .reset_index()
+      .sort_values("avg_gap", ascending=False)
 )
+
+colors = ["steelblue" if g >= 0 else "tomato" for g in state_summary["avg_gap"]]
+
+fig, ax = plt.subplots(figsize=(18, 8))
+ax.bar(state_summary["state"], state_summary["avg_gap"], color=colors, edgecolor="white", linewidth=0.5)
+ax.axhline(0, color="black", linewidth=1.0, linestyle="--")
+ax.set_title(
+    "5% Rule: Average Monthly Rent vs. Buy Gap by State\n"
+    "(Blue = Buying cheaper on average  |  Red = Renting cheaper on average)",
+    fontsize=13
+)
+ax.set_xlabel("State")
+ax.set_ylabel("Avg Monthly Gap ($/mo)  [Actual Rent − Break-even Rent]")
+ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:+,.0f}"))
+plt.xticks(rotation=90, fontsize=7)
+plt.tight_layout()
+plt.savefig(OUTPUT_CHART_ALL, dpi=150)
+plt.show()
+print(f"  Chart saved to: {OUTPUT_CHART_ALL}")
+
+# --- Chart 2: Idaho Counties — Horizontal Bar Chart -------------------------
+
+if not idaho.empty:
+    idaho_sorted = idaho.sort_values("monthly_gap")
+    colors_idaho = ["steelblue" if g >= 0 else "tomato" for g in idaho_sorted["monthly_gap"]]
+
+    fig, ax = plt.subplots(figsize=(10, max(6, len(idaho_sorted) * 0.35)))
+    ax.barh(idaho_sorted["county"], idaho_sorted["monthly_gap"], color=colors_idaho, edgecolor="white")
+    ax.axvline(0, color="black", linewidth=1.0, linestyle="--")
+    ax.set_title(
+        "5% Rule: Rent vs. Buy Gap — Idaho Counties\n"
+        "(Blue = Buying cheaper  |  Red = Renting cheaper)",
+        fontsize=12
+    )
+    ax.set_xlabel("Monthly Gap ($/mo)  [Actual Rent − Break-even Rent]")
+    ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:+,.0f}"))
+    plt.tight_layout()
+    plt.savefig(OUTPUT_CHART_IDAHO, dpi=150)
+    plt.show()
+    print(f"  Chart saved to: {OUTPUT_CHART_IDAHO}")
+    
