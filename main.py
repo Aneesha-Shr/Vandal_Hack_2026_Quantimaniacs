@@ -100,11 +100,11 @@ def calculate_rent_vs_buy(
 # --- Example Execution ---
 calculate_rent_vs_buy(
     house_cost=400000,          # $400,000 home
-    rent=1000,                  # $1,000/month starting rent
+    rent=2000,                  # $1,000/month starting rent
     int_rate=0.065,             # 6.5% mortgage interest rate
     increase_home_val=0.03,     # 3% annual home appreciation
     increase_rent=0.04,         # 4% annual rent increase
-    treasury_bond=0.1,         # 4.5% annual return on investment
+    treasury_bond=0.04,         # 4.5% annual return on investment
     down_payment_percent=0.2, 
     loan_term_years=30
 )
